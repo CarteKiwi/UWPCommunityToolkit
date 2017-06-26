@@ -52,7 +52,7 @@ namespace Microsoft.Toolkit.Uwp.SampleApp.SamplePages
             }
 
             // Initialize the service
-            MicrosoftGraphService.Instance.Initialize(ClientId.Text);
+            MicrosoftGraphService.Instance.Initialize(ClientId.Text, ClientVersion1.IsChecked.HasValue && ClientVersion1.IsChecked.Value ? MicrosoftGraphEnums.AuthenticationModel.V1 : MicrosoftGraphEnums.AuthenticationModel.V2);
 
             // Login via Azure Active Directory
             if (!await MicrosoftGraphService.Instance.LoginAsync())
@@ -245,7 +245,7 @@ namespace Microsoft.Toolkit.Uwp.SampleApp.SamplePages
         private void LogOutButton_Click(object sender, RoutedEventArgs e)
         {
             MessagesList.LoadMoreItemsAsync().Cancel();
-            MicrosoftGraphService.Instance.Logout();
+            MicrosoftGraphService.Instance.LogoutAsync();
             EventsList.Visibility = Visibility.Collapsed;
             EventsBox.Visibility = Visibility.Collapsed;
             MessagesList.Visibility = Visibility.Collapsed;

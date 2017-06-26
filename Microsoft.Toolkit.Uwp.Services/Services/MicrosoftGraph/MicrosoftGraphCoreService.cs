@@ -94,9 +94,10 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
         /// Initialize Microsoft Graph.
         /// </summary>
         /// <param name='appClientId'>Azure AD's App client id</param>
+        /// <param name="authenticationModel">V1 or V2</param>
         /// <param name="servicesToInitialize">A combination of value to instanciate different services</param>
         /// <returns>Success or failure.</returns>
-        public bool Initialize(string appClientId, ServicesToInitialize servicesToInitialize = ServicesToInitialize.Message | ServicesToInitialize.UserProfile | ServicesToInitialize.Event)
+        public bool Initialize(string appClientId, AuthenticationModel authenticationModel = AuthenticationModel.V1, ServicesToInitialize servicesToInitialize = ServicesToInitialize.Message | ServicesToInitialize.UserProfile | ServicesToInitialize.Event)
         {
             if (string.IsNullOrEmpty(appClientId))
             {
@@ -104,7 +105,8 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
             }
 
             _appClientId = appClientId;
-            _graphProvider = CreateGraphClientProvider(appClientId);
+            _authenticationModel = authenticationModel;
+            _graphProvider = CreateGraphClientProvider(appClientId, authenticationModel);
             _servicesToInitialize = servicesToInitialize;
             _isInitialized = true;
             return true;
@@ -114,15 +116,14 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
         /// Logout the current user
         /// </summary>
         /// <returns>success or failure</returns>
-        public async Task<bool> Logout()
+        public async Task<bool> LogoutAsync()
         {
             if (!_isInitialized)
             {
                 throw new InvalidOperationException("Microsoft Graph not initialized.");
             }
 
-            var authenticationModel = _authenticationModel.ToString();
-            return await _authentication.LogoutAsync(authenticationModel);
+            return await _authentication.LogoutAsync(_authenticationModel);
         }
 
         /// <summary>
@@ -146,7 +147,7 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
             }
             else
             {
-                // accessToken = await _authentication.GetUserTokenV2Async(_appClientId);
+                accessToken = await _authentication.GetUserTokenV2Async(_appClientId);
             }
 
             if (string.IsNullOrEmpty(accessToken))
@@ -184,8 +185,9 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
         /// Create Microsoft Graph client
         /// </summary>
         /// <param name='appClientId'>Azure AD's App client id</param>
+        /// <param name="authenticationModel">V1 or V2</param>
         /// <returns>instance of the GraphServiceclient</returns>
-        private GraphServiceClient CreateGraphClientProvider(string appClientId)
+        private GraphServiceClient CreateGraphClientProvider(string appClientId, AuthenticationModel authenticationModel)
         {
             return new GraphServiceClient(
                   new DelegateAuthenticationProvider(
@@ -195,7 +197,9 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
                          requestMessage.Headers.Authorization =
                                             new AuthenticationHeaderValue(
                                                      "bearer",
-                                                     await _authentication.GetUserTokenAsync(appClientId).ConfigureAwait(false));
+                                                     authenticationModel == AuthenticationModel.V1 ?
+                                                     await _authentication.GetUserTokenAsync(appClientId).ConfigureAwait(false) :
+                                                     await _authentication.GetUserTokenV2Async(appClientId).ConfigureAwait(false));
                          return;
                      }));
         }

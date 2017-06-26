@@ -39,9 +39,9 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
         private const string MicrosoftGraphResource = "https://graph.microsoft.com";
         private const string DefaultRedirectUri = "urn:ietf:wg:oauth:2.0:oob";
 
-        private const string AuthorityV2Model = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
+        private const string AuthorityV2 = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
         private const string AuthorizationTokenService = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
-        private const string LogoutUrlV2Model = "https://login.microsoftonline.com/common/oauth2/v2.0/logout";
+        private const string LogoutUrlV2 = "https://login.microsoftonline.com/common/oauth2/v2.0/logout";
         private const string Scope = "openid+profile+https://graph.microsoft.com/Files.ReadWrite https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/User.ReadWrite+offline_access";
 
         /// <summary>
@@ -50,6 +50,7 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
         public MicrosoftGraphAuthenticationHelper()
         {
             _vault = new PasswordVault();
+            LoadCredential();
         }
 
         /// <summary>
@@ -71,11 +72,6 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
         /// Password vault used to store access tokens
         /// </summary>
         private readonly PasswordVault _vault;
-
-        /// <summary>
-        /// Store the current connected user
-        /// </summary>
-        private Identity.Client.User _user;
 
         /// <summary>
         /// Store the Oauth2 access token.
@@ -102,20 +98,71 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
         /// <returns>An oauth2 access token.</returns>
         internal async Task<string> GetUserTokenAsync(string appClientId)
         {
-            // For the first use get an access token prompting the user, after one hour
-            // refresh silently the token
-            if (_tokenForUser == null)
+            IdentityModel.Clients.ActiveDirectory.AuthenticationResult userAuthnResult = null;
+            try
             {
-                IdentityModel.Clients.ActiveDirectory.AuthenticationResult userAuthnResult = await _azureAdContext.AcquireTokenAsync(MicrosoftGraphResource, appClientId, new Uri(DefaultRedirectUri), new IdentityModel.Clients.ActiveDirectory.PlatformParameters(PromptBehavior.Always, false));
-                _tokenForUser = userAuthnResult.AccessToken;
-                _expiration = userAuthnResult.ExpiresOn;
+                // For the first use get an access token prompting the user, after one hour
+                // refresh silently the token
+                if (_tokenForUser == null)
+                {
+                    userAuthnResult = await _azureAdContext.AcquireTokenAsync(MicrosoftGraphResource, appClientId, new Uri(DefaultRedirectUri), new IdentityModel.Clients.ActiveDirectory.PlatformParameters(PromptBehavior.Always, false));
+                }
+                else if (_expiration <= DateTimeOffset.UtcNow.AddMinutes(5))
+                {
+
+                    userAuthnResult = await _azureAdContext.AcquireTokenAsync(MicrosoftGraphResource, appClientId, new Uri(DefaultRedirectUri), new IdentityModel.Clients.ActiveDirectory.PlatformParameters(PromptBehavior.Auto, false));
+                    //userAuthnResult = await _azureAdContext.AcquireTokenSilentAsync(MicrosoftGraphResource, appClientId);
+                }
+
+                if (userAuthnResult != null)
+                {
+                    StoreCredential(userAuthnResult.UserInfo.DisplayableId, userAuthnResult.AccessToken, userAuthnResult.ExpiresOn);
+                }
+            }
+            catch (Exception ex)
+            {
+                CleanToken();
+                //return await GetUserTokenAsync(appClientId);
             }
 
-            if (_expiration <= DateTimeOffset.UtcNow.AddMinutes(5))
+            return _tokenForUser;
+        }
+
+        /// <summary>
+        /// Get a Microsoft Graph access token using the v2.0 Endpoint.
+        /// </summary>
+        /// <param name="appClientId">Application client ID</param>
+        /// <returns>An oauth2 access token.</returns>
+        internal async Task<string> GetUserTokenV2Async(string appClientId)
+        {
+            string authorizationUrl = $"{AuthorityV2}?response_type=code&client_id={appClientId}&redirect_uri={DefaultRedirectUri}&scope={Scope}&response_mode=query";
+            WebAuthenticationResult webAuthResult = null;
+
+            if (_tokenForUser == null)
             {
-                IdentityModel.Clients.ActiveDirectory.AuthenticationResult userAuthnResult = await _azureAdContext.AcquireTokenSilentAsync(MicrosoftGraphResource, appClientId);
-                _tokenForUser = userAuthnResult.AccessToken;
-                _expiration = userAuthnResult.ExpiresOn;
+                webAuthResult = await WebAuthenticationBroker.AuthenticateAsync(WebAuthenticationOptions.None, new Uri(authorizationUrl), new Uri(DefaultRedirectUri));
+            }
+            else if (_expiration <= DateTimeOffset.UtcNow.AddMinutes(5))
+            {
+                var code = "";
+                var codeUrl = authorizationUrl + "&code=" + code;
+                webAuthResult = await WebAuthenticationBroker.AuthenticateSilentlyAsync(new Uri(authorizationUrl), WebAuthenticationOptions.SilentMode);
+            }
+
+            // Process the navigation result.
+            if (webAuthResult != null)
+            {
+                if (webAuthResult.ResponseStatus == WebAuthenticationStatus.Success)
+                {
+                    var authorizationCode = ParseAuthorizationCode(webAuthResult.ResponseData);
+                    var jwtToken = await RequestTokenAsync(appClientId, authorizationCode);
+                    //StoreCredential(jwtToken.IdToken, jwtToken.AccessToken, authorizationCode);
+                    StoreCredential(jwtToken.IdToken, jwtToken.AccessToken, DateTimeOffset.UtcNow.AddSeconds(double.Parse(jwtToken.ExpiresIn)));
+                }
+                else
+                {
+                    CleanToken();
+                }
             }
 
             return _tokenForUser;
@@ -126,6 +173,13 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
         /// </summary>
         internal void CleanToken()
         {
+            ApplicationData.Current.LocalSettings.Values[STORAGEKEYUSER] = null;
+            if (_passwordCredential != null)
+            {
+                _vault.Remove(_passwordCredential);
+                _passwordCredential = null;
+            }
+
             _tokenForUser = null;
             _azureAdContext.TokenCache.Clear();
         }
@@ -135,71 +189,40 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
         /// </summary>
         /// <param name="authenticationModel">Authentication version endPoint</param>
         /// <returns>Success or failure</returns>
-        internal async Task<bool> LogoutAsync(string authenticationModel)
+        internal async Task<bool> LogoutAsync(MicrosoftGraphEnums.AuthenticationModel authenticationModel)
         {
-            HttpResponseMessage response = null;
-            if (authenticationModel.Equals("V1"))
-            {
-                using (var client = new HttpClient())
-                {
-                    var request = new HttpRequestMessage(HttpMethod.Get, LogoutUrl);
-                    response = await client.SendAsync(request);
-                    return response.IsSuccessStatusCode;
-                }
-            }
-           else if (authenticationModel.Equals("V2"))
-            {
-                if (_user != null)
-                {
-                    _user.SignOut();
-                }
-            }
+            CleanToken();
 
-            ApplicationData.Current.LocalSettings.Values[STORAGEKEYUSER] = null;
-            if (_passwordCredential != null)
+            using (var client = new HttpClient())
             {
-                _vault.Remove(_passwordCredential);
-            }
+                var request = new HttpRequestMessage(HttpMethod.Get, authenticationModel == MicrosoftGraphEnums.AuthenticationModel.V1 ? LogoutUrl : LogoutUrlV2);
 
-            return true;
+                var response = await client.SendAsync(request);
+                return response.IsSuccessStatusCode;
+            }
         }
 
-        private string StoreCredential(Identity.Client.AuthenticationResult authResult)
+        private void StoreCredential(string id, string accessToken, DateTimeOffset expiresOn)
         {
-            _user = authResult.User;
-            _expiration = authResult.ExpiresOn;
-            ApplicationData.Current.LocalSettings.Values[STORAGEKEYEXPIRATION] = authResult.ExpiresOn;
-            ApplicationData.Current.LocalSettings.Values[STORAGEKEYUSER] = authResult.User.DisplayableId;
-            _passwordCredential = new PasswordCredential(STORAGEKEYACCESSTOKEN, authResult.User.DisplayableId, authResult.Token);
+            _tokenForUser = accessToken;
+            _expiration = expiresOn;
+            ApplicationData.Current.LocalSettings.Values[STORAGEKEYEXPIRATION] = expiresOn;
+            ApplicationData.Current.LocalSettings.Values[STORAGEKEYUSER] = id;
+            _passwordCredential = new PasswordCredential(STORAGEKEYACCESSTOKEN, id, accessToken);
             _vault.Add(_passwordCredential);
-            return authResult.Token;
         }
 
-        /// <summary>
-        /// Get a Microsoft Graph access token using the v2.0 Endpoint.
-        /// </summary>
-        /// <param name="appClientId">Application client ID</param>
-        /// <returns>An oauth2 access token.</returns>
-        private async Task<string> GetUserTokenV2Async(string appClientId)
+        private void LoadCredential()
         {
-            string authorizationCode = null;
-            string authorizationUrl = $"{AuthorityV2Model}?response_type=code&client_id={appClientId}&redirect_uri={DefaultRedirectUri}&scope={Scope}&response_mode=query";
-
-            JwToken jwtToken = null;
-            if (_tokenForUser == null)
+            if (ApplicationData.Current.LocalSettings.Values[STORAGEKEYUSER] == null)
             {
-                var webAuthResult = await WebAuthenticationBroker.AuthenticateAsync(WebAuthenticationOptions.None, new Uri(authorizationUrl), new Uri(DefaultRedirectUri));
-
-                // Process the navigation result.
-                if (webAuthResult.ResponseStatus == WebAuthenticationStatus.Success)
-                {
-                    authorizationCode = ParseAuthorizationCode(webAuthResult.ResponseData);
-                    jwtToken = await RequestTokenAsync(appClientId, authorizationCode);
-                    _tokenForUser = jwtToken.AccessToken;
-                }
+                return;
             }
 
-            return _tokenForUser;
+            _expiration = (DateTimeOffset)ApplicationData.Current.LocalSettings.Values[STORAGEKEYEXPIRATION];
+            var id = ApplicationData.Current.LocalSettings.Values[STORAGEKEYUSER].ToString();
+            _passwordCredential = _vault.Retrieve(STORAGEKEYACCESSTOKEN, id);
+            _tokenForUser = _passwordCredential.Password;
         }
 
         private async Task<JwToken> RequestTokenAsync(string appClientId, string code)
@@ -234,11 +257,11 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
             return null;
         }
 
-       /// <summary>
-       /// Retrieve the authorisation code
-       /// </summary>
-       /// <param name="responseData">string contening the authorisation code</param>
-       /// <returns>The authorization code</returns>
+        /// <summary>
+        /// Retrieve the authorisation code
+        /// </summary>
+        /// <param name="responseData">string contening the authorisation code</param>
+        /// <returns>The authorization code</returns>
         private string ParseAuthorizationCode(string responseData)
         {
             string code = null;

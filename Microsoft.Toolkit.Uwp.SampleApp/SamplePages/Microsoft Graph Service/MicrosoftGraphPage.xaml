@@ -81,6 +81,15 @@
                             <TextBox x:Name="ClientId"
                                      Margin="0,0,0,12"
                                      Header="Client Id:" />
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton x:Name="ClientVersion1"
+                                             Content="V1" 
+                                             IsChecked="True"
+                                             GroupName="Version"/>
+                                <RadioButton x:Name="ClientVersion2"
+                                             Content="V2"
+                                             GroupName="Version"/>
+                            </StackPanel>
                             <HyperlinkButton Margin="0,0,0,15"
                                              Content="Show me how to get this ID"
                                              NavigateUri="http://uwpcommunitytoolkit.readthedocs.io/en/master/services/MicrosoftGraph/" />
