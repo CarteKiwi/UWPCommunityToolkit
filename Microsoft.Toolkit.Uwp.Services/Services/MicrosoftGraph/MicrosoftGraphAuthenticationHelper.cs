@@ -12,6 +12,7 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -109,8 +110,7 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
                 }
                 else if (_expiration <= DateTimeOffset.UtcNow.AddMinutes(5))
                 {
-
-                    userAuthnResult = await _azureAdContext.AcquireTokenAsync(MicrosoftGraphResource, appClientId, new Uri(DefaultRedirectUri), new IdentityModel.Clients.ActiveDirectory.PlatformParameters(PromptBehavior.Auto, false));
+                    userAuthnResult = await _azureAdContext.AcquireTokenAsync(MicrosoftGraphResource, appClientId, null, new IdentityModel.Clients.ActiveDirectory.PlatformParameters(PromptBehavior.Never, false));
                     //userAuthnResult = await _azureAdContext.AcquireTokenSilentAsync(MicrosoftGraphResource, appClientId);
                 }
 
@@ -122,7 +122,6 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
             catch (Exception ex)
             {
                 CleanToken();
-                //return await GetUserTokenAsync(appClientId);
             }
 
             return _tokenForUser;
@@ -144,8 +143,6 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
             }
             else if (_expiration <= DateTimeOffset.UtcNow.AddMinutes(5))
             {
-                var code = "";
-                var codeUrl = authorizationUrl + "&code=" + code;
                 webAuthResult = await WebAuthenticationBroker.AuthenticateSilentlyAsync(new Uri(authorizationUrl), WebAuthenticationOptions.SilentMode);
             }
 
@@ -219,10 +216,15 @@ namespace Microsoft.Toolkit.Uwp.Services.MicrosoftGraph
                 return;
             }
 
-            _expiration = (DateTimeOffset)ApplicationData.Current.LocalSettings.Values[STORAGEKEYEXPIRATION];
+            var exp = ApplicationData.Current.LocalSettings.Values[STORAGEKEYEXPIRATION];
+            if (exp != null)
+            {
+                DateTimeOffset.TryParse(exp.ToString(), out _expiration);
+            }
+
             var id = ApplicationData.Current.LocalSettings.Values[STORAGEKEYUSER].ToString();
             _passwordCredential = _vault.Retrieve(STORAGEKEYACCESSTOKEN, id);
-            _tokenForUser = _passwordCredential.Password;
+            _tokenForUser = _passwordCredential?.Password;
         }
 
         private async Task<JwToken> RequestTokenAsync(string appClientId, string code)
