@@ -18,7 +18,7 @@ using Microsoft.Toolkit.Uwp.Services.MicrosoftGraph;
 
 namespace Microsoft.Toolkit.Uwp.SampleApp.SamplePages
 {
-    public class MicrosoftGraphSource<T> : IIncrementalSource<T>
+    public class MicrosoftGraphSource<T> : Collections.IIncrementalSource<T>
     {
         private bool isFirstCall = true;
 
@@ -32,7 +32,8 @@ namespace Microsoft.Toolkit.Uwp.SampleApp.SamplePages
                 {
                     items = (IEnumerable<T>)await MicrosoftGraphService.Instance.User.Message.GetEmailsAsync(cancellationToken, pageSize);
                 }
-                else
+
+                if (typeof(T) == typeof(Event))
                 {
                     items = (IEnumerable<T>)await MicrosoftGraphService.Instance.User.Event.GetEventsAsync(cancellationToken, pageSize);
                 }
@@ -50,7 +51,8 @@ namespace Microsoft.Toolkit.Uwp.SampleApp.SamplePages
                 {
                     items = (IEnumerable<T>)await MicrosoftGraphService.Instance.User.Message.NextPageEmailsAsync(cancellationToken);
                 }
-                else
+
+                if (typeof(T) == typeof(Event))
                 {
                     items = (IEnumerable<T>)await MicrosoftGraphService.Instance.User.Event.NextPageEventsAsync(cancellationToken);
                 }

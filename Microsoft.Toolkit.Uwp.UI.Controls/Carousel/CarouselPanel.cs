@@ -11,6 +11,7 @@
 // ******************************************************************
 
 using System;
+using Microsoft.Toolkit.Uwp.UI.Extensions;
 using Windows.Foundation;
 using Windows.UI;
 using Windows.UI.Xaml;
@@ -55,7 +56,7 @@ namespace Microsoft.Toolkit.Uwp.UI.Controls
                     return carouselControl;
                 }
 
-                carouselControl = this.FindVisualAscendant<Carousel>();
+                carouselControl = this.FindAscendant<Carousel>();
 
                 if (carouselControl == null)
                 {
@@ -223,6 +224,58 @@ namespace Microsoft.Toolkit.Uwp.UI.Controls
         }
 
         /// <summary>
+        /// Measure items
+        /// </summary>
+        /// <returns>Return carousel size</returns>
+        protected override Size MeasureOverride(Size availableSize)
+        {
+            var containerWidth = 0d;
+            var containerHeight = 0d;
+
+            foreach (FrameworkElement container in Children)
+            {
+                container.Measure(availableSize);
+
+                if (container.DesiredSize.Width > containerWidth)
+                {
+                    containerWidth = container.DesiredSize.Width;
+                }
+
+                if (container.DesiredSize.Height > containerHeight)
+                {
+                    containerHeight = container.DesiredSize.Height;
+                }
+            }
+
+            var width = 0d;
+            var height = 0d;
+
+            // It's a Auto size, so we define the size should be 3 items
+            if (double.IsInfinity(availableSize.Width))
+            {
+                width = Carousel.Orientation == Orientation.Horizontal ? containerWidth * (Children.Count > 3 ? 3 : Children.Count) : containerWidth;
+            }
+            else
+            {
+                width = availableSize.Width;
+            }
+
+            // It's a Auto size, so we define the size should be 3 items
+            if (double.IsInfinity(availableSize.Height))
+            {
+                height = Carousel.Orientation == Orientation.Vertical ? containerHeight * (Children.Count > 3 ? 3 : Children.Count) : containerHeight;
+            }
+            else
+            {
+                height = availableSize.Height;
+            }
+
+            Clip = new RectangleGeometry { Rect = new Rect(0, 0, width, height) };
+
+            return new Size(width, height);
+        }
+
+        /// <summary>
         /// Arrange all items
         /// </summary>
         /// <returns>Return an item size</returns>
@@ -321,22 +374,6 @@ namespace Microsoft.Toolkit.Uwp.UI.Controls
                 AddAnimation(storyboard, element, Carousel.TransitionDuration, proj.RotationY, rotationYProjection, Carousel.EasingFunction);
                 AddAnimation(storyboard, element, Carousel.TransitionDuration, proj.RotationZ, rotationZProjection, Carousel.EasingFunction);
             }
-        }
-
-        /// <summary>
-        /// Measure items
-        /// </summary>
-        /// <returns>Return item size</returns>
-        protected override Size MeasureOverride(Size availableSize)
-        {
-            Clip = new RectangleGeometry { Rect = new Rect(0, 0, availableSize.Width, availableSize.Height) };
-
-            foreach (FrameworkElement container in Children)
-            {
-                container.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            }
-
-            return availableSize;
         }
 
         /// <summary>
